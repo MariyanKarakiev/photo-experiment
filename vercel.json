@@ -1,0 +1,3 @@
+{
+  "installCommand": "npm ci --registry=https://registry.npmjs.org/ --no-audit --no-fund"
+}
