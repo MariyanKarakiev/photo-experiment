@@ -1,19 +1,42 @@
-// Photos as uploaded — this is the natural order shown in stage 1 (look).
-export const PHOTOS = [
-  { id: "p1", src: "/photos/IMG_1544.JPG" },
-  { id: "p2", src: "/photos/IMG_1545.JPG" },
-  { id: "p3", src: "/photos/IMG_1546.JPG" },
-  { id: "p4", src: "/photos/IMG_1547.JPG" },
-  { id: "p5", src: "/photos/IMG_1548.JPG" },
-  { id: "p6", src: "/photos/IMG_1549.JPG" },
-  { id: "p7", src: "/photos/IMG_1550.JPG" },
-  { id: "p8", src: "/photos/IMG_1551.JPG" },
-  { id: "p9", src: "/photos/IMG_1553.JPG" },
-];
+// Photos are auto-discovered from `src/assets/alexandra_bw/`.
+// Drop new files in that folder, `git push`, Vercel rebuilds, they're live.
+// Supported formats: .jpg .jpeg .png .webp (case-insensitive).
+//
+// Each photo's id is its filename without extension (e.g. "IMG_1544").
 
-// The photographer's arrangement — order shown on the reveal.
-// Edit this array to change what viewers see at the end.
-export const PHOTOGRAPHER_PICK = ["p5", "p9", "p1", "p7", "p4", "p3", "p6", "p8", "p2"];
+const modules = import.meta.glob(
+  "../assets/alexandra_bw/*.{jpg,JPG,jpeg,JPEG,png,PNG,webp,WEBP}",
+  { eager: true }
+);
+
+function entryFromModule(path, mod) {
+  const filename = path.split("/").pop();
+  const id = filename.replace(/\.[^.]+$/, "");
+  // Astro turns image imports into an ImageMetadata object where .src is
+  // the resolved (hashed in prod) URL; plain URL modules expose the string
+  // as .default directly.
+  const def = mod.default;
+  const src = typeof def === "string" ? def : def?.src;
+  return { id, src };
+}
+
+// Alphabetical by id so a new file dropped into the folder falls into a
+// stable, predictable slot.
+export const PHOTOS = Object.entries(modules)
+  .map(([path, mod]) => entryFromModule(path, mod))
+  .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+// The photographer's arrangement — order shown on the reveal screen.
+// Use filenames without the extension (e.g. "IMG_1548"). Any ids that
+// don't match a real file are dropped. If the array is empty or nothing
+// matches, the reveal falls back to the natural alphabetical order.
+const PHOTOGRAPHER_PICK_INPUT = [];
+
+const validIds = new Set(PHOTOS.map((p) => p.id));
+const filteredPick = PHOTOGRAPHER_PICK_INPUT.filter((id) => validIds.has(id));
+export const PHOTOGRAPHER_PICK = filteredPick.length
+  ? filteredPick
+  : PHOTOS.map((p) => p.id);
 
 // Web3Forms access key (public, safe to ship). Register one at web3forms.com.
 // Submissions arrive as email to the address tied to the key.
