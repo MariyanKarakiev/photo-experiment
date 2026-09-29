@@ -129,8 +129,9 @@ const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
       }
       .chart .head .t { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; }
       .chart .head .u { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-soft); text-transform: uppercase; }
-      .chart-rows { display: grid; grid-template-columns: 20px 1fr 34px; gap: 6px 12px; align-items: center; }
-      .chart-rows .id { font-size: 11px; color: var(--ink-soft); }
+      .chart-rows { display: grid; grid-template-columns: 22px 60px 1fr 34px; gap: 6px 10px; align-items: center; }
+      .chart-rows .thumb { width: 22px; height: 33px; object-fit: cover; display: block; line-height: 0; user-select: none; }
+      .chart-rows .id { font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
       .chart-rows .bar { height: 8px; background: var(--ink); min-width: 1px; }
       .chart-rows .bar.zero { background: var(--rule); height: 1px; }
       .chart-rows .count { font-size: 11px; text-align: right; }
@@ -346,6 +347,11 @@ const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
         font-variant-numeric: tabular-nums;
       }
       .journey .step .a { font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; }
+      .journey .step .thumb {
+        width: 16px; height: 24px; object-fit: cover;
+        display: inline-block; vertical-align: middle;
+        margin-left: 2px;
+      }
       .journey .step .p { font-weight: 500; }
       .empty-line { color: var(--ink-soft); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; }
 
@@ -446,6 +452,7 @@ const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
           <div class="chart-rows">
             {PHOTOS.map((p) => (
               <>
+                <img class="thumb" src={p.src} alt="" />
                 <div class="id">{p.id}</div>
                 <div class={"bar" + (pickCounts[p.id] === 0 ? " zero" : "")} style={`width: ${(pickCounts[p.id] / maxPick) * 100}%`}></div>
                 <div class="count">{pickCounts[p.id]}</div>
@@ -458,6 +465,7 @@ const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
           <div class="chart-rows">
             {PHOTOS.map((p) => (
               <>
+                <img class="thumb" src={p.src} alt="" />
                 <div class="id">{p.id}</div>
                 <div class={"bar" + (openerCounts[p.id] === 0 ? " zero" : "")} style={`width: ${(openerCounts[p.id] / maxOpener) * 100}%`}></div>
                 <div class="count">{openerCounts[p.id]}</div>
@@ -470,6 +478,7 @@ const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
           <div class="chart-rows">
             {PHOTOS.map((p) => (
               <>
+                <img class="thumb" src={p.src} alt="" />
                 <div class="id">{p.id}</div>
                 <div class={"bar" + (avgAttention[p.id] === 0 ? " zero" : "")} style={`width: ${(avgAttention[p.id] / maxAttention) * 100}%`}></div>
                 <div class="count">{avgAttention[p.id]}s</div>
@@ -641,12 +650,13 @@ const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
           .join("")}</div>`;
         const timeByScreenHtml = barHtml + legendHtml;
 
-        // Selection journey — inline chips
+        // Selection journey — inline chips with tiny thumbs
         const journeyHtml = events.length
           ? `<div class="journey">${events.map((e) => `
               <span class="step ${esc(e.action)}">
                 <span class="t">${e.atSecond}s</span>
                 <span class="a">${esc(e.action)}</span>
+                <img class="thumb" src="${esc(idMap[e.photo] || "")}" alt="" />
                 <span class="p">${esc(e.photo)}</span>
               </span>
             `).join("")}</div>`

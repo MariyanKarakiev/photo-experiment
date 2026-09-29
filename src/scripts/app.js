@@ -192,7 +192,12 @@ function go(step) {
   Object.entries(screens).forEach(([k, node]) => {
     node.classList.toggle("on", k === step);
   });
-  if (el.restart) el.restart.classList.toggle("visible", step !== STEPS.TITLE);
+  if (el.restart) {
+    // Hidden during the title screen and the entire reveal sequence
+    // (slideshow + finale). It reappears when the final tile row lands.
+    const chromeless = step === STEPS.TITLE || step === STEPS.REVEAL;
+    el.restart.classList.toggle("visible", !chromeless);
+  }
   const focusOn = {
     [STEPS.NAME]: () => el.nameInput?.focus(),
     [STEPS.WHY]:  () => el.whyInput?.focus(),
@@ -208,9 +213,11 @@ function go(step) {
   }
 
   if (step === STEPS.LOOK) updateGridReady();
+  if (step === STEPS.REVEAL) startRevealSequence();
 }
 
 function restart() {
+  if (revealSlideTimer) { clearTimeout(revealSlideTimer); revealSlideTimer = null; }
   try { localStorage.removeItem(STORAGE.LOCAL_KEY); } catch {}
   window.location.reload();
 }
@@ -278,18 +285,36 @@ function initLook() {
   el.tileRow = $("#tile-row");
   el.lookCaption = $("#look-caption");
   el.lookReady = $("#look-ready");
-  $$(".tile", el.tileRow).forEach((tile, idx) => {
+
+  // Bind handlers by the tile's data-idx (canonical index into PHOTOS)
+  // BEFORE shuffling the DOM. That way the shuffle is purely visual and
+  // clicks / opener recording still map to the correct photo.
+  $$(".tile", el.tileRow).forEach((tile) => {
+    const idx = Number(tile.dataset.idx);
     tile.addEventListener("click", () => onTileClick(idx));
     tile.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTileClick(idx); }
     });
   });
+  shuffleTileOrder();
+
   el.lookReady.addEventListener("click", () => {
     if (state.viewed.size >= N) go(STEPS.BRIEF);
   });
   fitGrid();
   window.addEventListener("resize", fitGrid);
   updateGridReady();
+}
+
+// Fisher–Yates shuffle of the tile-row's DOM children so every visit
+// presents the gallery in a different order without any layout jump.
+function shuffleTileOrder() {
+  const tiles = Array.from(el.tileRow.children);
+  for (let i = tiles.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    if (j !== i) [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+  }
+  tiles.forEach((t) => el.tileRow.appendChild(t));
 }
 
 function onTileClick(idx) {
@@ -503,20 +528,143 @@ async function postSubmission(payload) {
 
 /* ---------- reveal ---------- */
 
+/* Cinematic reveal:
+   1. black screen
+   2. title fades in slow, fades out slower
+   3. photos cut in one after another, no transition,
+      each interval faster than the last, floor at ~20 fps, loops forever. */
+
+const REVEAL_TIMING = Object.freeze({
+  TITLE_FADE_IN_MS:      1600, // matches CSS
+  TITLE_HOLD_MS:         1600, // how long the title stays fully visible
+  TITLE_FADE_OUT_MS:     2800, // matches CSS
+  PHOTO_START_MS:        1800, // first interval between photos
+  PHOTO_FLOOR_MS:          50, // 20 fps, target end interval
+  PHOTO_DECAY:           0.88, // ratio applied each transition
+  PHOTO_HOLD_AT_FLOOR_MS: 1500, // how long to strobe once the floor is reached
+  FINALE_FADE_MS:        2500, // matches CSS
+  FINALE_HOLD_AFTER_MS:  3200, // sit on the finale image before the tile row
+});
+
+// Marker at the END of a filename (base without extension) that flags the
+// finale photo. `_last_include` behaves the same as `_last` for the finale
+// slot, but ALSO keeps the photo in the final tile row.
+const FINALE_MARKER_RE = /_last(_include)?$/i;
+const FINALE_INCLUDE_RE = /_last_include$/i;
+
+let revealSequenceStarted = false;
+let revealSlideTimer = null;
+
 function initReveal() {
-  const row = $("#reveal-row");
-  const byId = Object.fromEntries(PHOTOS.map((p) => [p.id, p]));
-  PHOTOGRAPHER_PICK.forEach((id) => {
-    const p = byId[id];
-    if (!p) return;
-    const tile = document.createElement("div");
-    tile.className = "tile";
-    const img = document.createElement("img");
-    img.src = p.src;
-    img.alt = "";
-    tile.appendChild(img);
-    row.appendChild(tile);
-  });
+  const all = PHOTOGRAPHER_PICK.filter((p) => p && p.src);
+  el.revealTitleEl      = $("#reveal-title");
+  el.revealPhotoEl      = $("#reveal-photo");
+  el.revealFinaleEl     = $("#reveal-finale-photo");
+  el.revealFinalEl      = $("#reveal-final");
+  el.revealRowEl        = $("#reveal-row");
+
+  // Split into slideshow sequence + optional finale.
+  el.revealFinalePhoto = all.find((p) => FINALE_MARKER_RE.test(p.id)) || null;
+  const finaleIncludedInRow =
+    el.revealFinalePhoto && FINALE_INCLUDE_RE.test(el.revealFinalePhoto.id);
+  el.revealPhotos = all.filter((p) => !FINALE_MARKER_RE.test(p.id));
+
+  // The final row uses the sequence photos in natural order, plus the
+  // finale if its filename ends with _last_include.
+  const rowPhotos = all.filter(
+    (p) => !FINALE_MARKER_RE.test(p.id) || (finaleIncludedInRow && p === el.revealFinalePhoto)
+  );
+
+  // Preload everything so runtime swaps at 20 fps have no network stalls
+  // and the finale's slow fade doesn't wait on a download.
+  all.forEach((p) => { const im = new Image(); im.src = p.src; });
+
+  // Build the final row (hidden until the slideshow + finale end).
+  if (rowPhotos.length > 0) {
+    el.revealRowEl.style.setProperty("--reveal-cols", rowPhotos.length);
+    rowPhotos.forEach((p) => {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      const img = document.createElement("img");
+      img.src = p.src;
+      img.alt = "";
+      tile.appendChild(img);
+      el.revealRowEl.appendChild(tile);
+    });
+  }
+}
+
+function startRevealSequence() {
+  if (revealSequenceStarted) return;
+  revealSequenceStarted = true;
+  if (!el.revealTitleEl || !el.revealPhotoEl) return;
+
+  // Kick off the fade-in on the next frame so the transition actually plays.
+  requestAnimationFrame(() => el.revealTitleEl.classList.add("in"));
+
+  const titleFadeOutAt = REVEAL_TIMING.TITLE_FADE_IN_MS + REVEAL_TIMING.TITLE_HOLD_MS;
+  const slideshowStartsAt = titleFadeOutAt + REVEAL_TIMING.TITLE_FADE_OUT_MS;
+
+  setTimeout(() => {
+    el.revealTitleEl.classList.remove("in");
+    el.revealTitleEl.classList.add("out");
+  }, titleFadeOutAt);
+
+  setTimeout(startSlideshow, slideshowStartsAt);
+}
+
+function startSlideshow() {
+  if (!el.revealPhotos || el.revealPhotos.length === 0) return;
+  el.revealPhotoEl.classList.add("on");
+  let interval = REVEAL_TIMING.PHOTO_START_MS;
+  let idx = 0;
+  const N = el.revealPhotos.length;
+  let floorReachedAt = null;
+  const tick = () => {
+    el.revealPhotoEl.src = el.revealPhotos[idx].src;
+    idx = (idx + 1) % N;
+    const nextInterval = Math.max(REVEAL_TIMING.PHOTO_FLOOR_MS, interval * REVEAL_TIMING.PHOTO_DECAY);
+    if (nextInterval === REVEAL_TIMING.PHOTO_FLOOR_MS && floorReachedAt === null) {
+      floorReachedAt = performance.now();
+    }
+    interval = nextInterval;
+    if (floorReachedAt !== null && (performance.now() - floorReachedAt) >= REVEAL_TIMING.PHOTO_HOLD_AT_FLOOR_MS) {
+      endSlideshow();
+      return;
+    }
+    revealSlideTimer = setTimeout(tick, interval);
+  };
+  tick();
+}
+
+function endSlideshow() {
+  if (revealSlideTimer) { clearTimeout(revealSlideTimer); revealSlideTimer = null; }
+  if (el.revealPhotoEl) el.revealPhotoEl.classList.remove("on");
+  if (el.revealFinalePhoto) {
+    playFinale();
+  } else {
+    revealFinalRow();
+  }
+}
+
+function playFinale() {
+  el.revealFinaleEl.src = el.revealFinalePhoto.src;
+  // Kick off the slow fade on the next frame so the transition plays.
+  requestAnimationFrame(() => el.revealFinaleEl.classList.add("in"));
+  const afterMs = REVEAL_TIMING.FINALE_FADE_MS + REVEAL_TIMING.FINALE_HOLD_AFTER_MS;
+  setTimeout(revealFinalRow, afterMs);
+}
+
+function revealFinalRow() {
+  // Finale drops out fast (not a slow fade — a quick disappearance) while
+  // the final composition (title + row) lands.
+  if (el.revealFinaleEl) {
+    el.revealFinaleEl.classList.remove("in");
+    el.revealFinaleEl.classList.add("out");
+  }
+  if (el.revealFinalEl) el.revealFinalEl.classList.add("on");
+  // The final composition is the moment `start over` is allowed back on stage.
+  if (el.restart) el.restart.classList.add("visible");
 }
 
 /* ---------- gesture / key helpers ---------- */

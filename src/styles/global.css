@@ -287,12 +287,114 @@ button, input, textarea { font-family: inherit; color: inherit; }
   min-height: 1em;
 }
 
-/* 07 — reveal */
-.reveal-title {
-  font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase;
+/* 07 — reveal · same background as every other screen, same title styling
+   as everywhere else. Sequence: title fades in slow, fades out slower,
+   then photos cut through the same centred slot, accelerating to ~20 fps
+   and looping. No black screen; no big hero type. */
+.reveal-scene .reveal-hero-title {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
   color: var(--ink-soft);
-  margin-bottom: 1.75rem;
   text-align: center;
+  opacity: 0;
+  transition: opacity 1600ms ease-out;
+  pointer-events: none;
+}
+.reveal-scene .reveal-hero-title.in { opacity: 1; }
+.reveal-scene .reveal-hero-title.out {
+  opacity: 0;
+  transition: opacity 2800ms ease-in;
+}
+.reveal-photo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-height: 82vh;
+  max-width: 92vw;
+  width: auto;
+  height: auto;
+  display: block;
+  visibility: hidden;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.reveal-photo.on { visibility: visible; }
+
+/* The finale photo — a file whose name ends with _last (or _last_include).
+   After the accelerating slideshow ends, this image fades in slowly and
+   scales up subtly. Sits on top of the slideshow photo (same slot). */
+.reveal-finale-photo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-height: 86vh;
+  max-width: 94vw;
+  width: auto;
+  height: auto;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: opacity 2500ms ease-out;
+}
+.reveal-finale-photo.in { opacity: 1; }
+.reveal-finale-photo.out {
+  opacity: 0;
+  transition: opacity 220ms ease-out;
+}
+
+/* The final composition: small title on top + one row of tiles.
+   Fades in as a group once the slideshow / finale end. */
+.reveal-final {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 600ms ease-in;
+}
+.reveal-final.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.reveal-final-title {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+.reveal-row {
+  --reveal-cols: 3;
+  --reveal-gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(var(--reveal-cols), minmax(0, 1fr));
+  gap: var(--reveal-gap);
+  width: min(
+    92vw,
+    calc(
+      (68vh * 2 / 3) * var(--reveal-cols)
+      + (var(--reveal-cols) - 1) * var(--reveal-gap)
+    )
+  );
+}
+.reveal-row .tile { position: relative; line-height: 0; }
+.reveal-row .tile img {
+  display: block; width: 100%; height: auto;
+  user-select: none;
 }
 
 /* start-over affordance */

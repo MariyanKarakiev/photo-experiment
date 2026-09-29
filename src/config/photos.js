@@ -1,11 +1,25 @@
-// Photos are auto-discovered from `src/assets/alexandra_bw/`.
-// Drop new files in that folder, `git push`, Vercel rebuilds, they're live.
-// Supported formats: .jpg .jpeg .png .webp (case-insensitive).
+// Photos are auto-discovered from two folders:
 //
-// Each photo's id is its filename without extension (e.g. "IMG_1544").
+//   src/assets/alexandra_bw/         — the series shown in the gallery
+//                                      (order in the gallery is RANDOMISED
+//                                      per visit — see app.js)
+//   src/assets/photographers_pick/   — the photographer's curated pick,
+//                                      rendered on the reveal screen in
+//                                      alphabetical filename order (prefix
+//                                      files with 01-, 02-, … to control
+//                                      sequence)
+//
+// Drop / rename / delete files in either folder, `git push`, Vercel
+// rebuilds and the site updates.
+//
+// Each photo's id is its filename without extension.
 
-const modules = import.meta.glob(
+const galleryModules = import.meta.glob(
   "../assets/alexandra_bw/*.{jpg,JPG,jpeg,JPEG,png,PNG,webp,WEBP}",
+  { eager: true }
+);
+const pickModules = import.meta.glob(
+  "../assets/photographers_pick/*.{jpg,JPG,jpeg,JPEG,png,PNG,webp,WEBP}",
   { eager: true }
 );
 
@@ -20,26 +34,24 @@ function entryFromModule(path, mod) {
   return { id, src };
 }
 
-// Alphabetical by id so a new file dropped into the folder falls into a
-// stable, predictable slot.
-export const PHOTOS = Object.entries(modules)
-  .map(([path, mod]) => entryFromModule(path, mod))
-  .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+function loadFolder(modules) {
+  return Object.entries(modules)
+    .map(([path, mod]) => entryFromModule(path, mod))
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+}
 
-// The photographer's arrangement — order shown on the reveal screen.
-// Use filenames without the extension (e.g. "IMG_1548"). Any ids that
-// don't match a real file are dropped. If the array is empty or nothing
-// matches, the reveal falls back to the natural alphabetical order.
-const PHOTOGRAPHER_PICK_INPUT = [];
+// Alphabetical (numeric-aware) so `01-`, `02-`, … prefixes drive the order.
+// The gallery UI shuffles this at runtime; only the reveal cares about the
+// literal sort of the pick folder.
+export const PHOTOS = loadFolder(galleryModules);
 
-const validIds = new Set(PHOTOS.map((p) => p.id));
-const filteredPick = PHOTOGRAPHER_PICK_INPUT.filter((id) => validIds.has(id));
-export const PHOTOGRAPHER_PICK = filteredPick.length
-  ? filteredPick
-  : PHOTOS.map((p) => p.id);
+const pickEntries = loadFolder(pickModules);
+
+// If the photographers_pick folder is empty, fall back to the gallery so
+// the reveal is never blank.
+export const PHOTOGRAPHER_PICK = pickEntries.length ? pickEntries : PHOTOS;
 
 // Web3Forms access key (public, safe to ship). Register one at web3forms.com.
-// Submissions arrive as email to the address tied to the key.
 export const WEB3FORMS_KEY = "YOUR_WEB3FORMS_ACCESS_KEY";
 
 // Bump when the telemetry payload shape changes so old submissions can be

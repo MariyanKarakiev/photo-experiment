@@ -42,8 +42,8 @@ import { PHOTOS, TITLE_LINES, TITLE_SUB, BRIEF_LINES, BRIEF_SUB } from "../confi
       <section id="screen-look" class="screen">
         <div class="look-wrap">
           <div id="tile-row" class="tile-row">
-            {PHOTOS.map((p) => (
-              <div class="tile" tabindex="0">
+            {PHOTOS.map((p, i) => (
+              <div class="tile" tabindex="0" data-idx={i}>
                 <img src={p.src} alt="" draggable="false" />
               </div>
             ))}
@@ -110,10 +110,13 @@ import { PHOTOS, TITLE_LINES, TITLE_SUB, BRIEF_LINES, BRIEF_SUB } from "../confi
       </section>
 
       <!-- 07 · reveal -->
-      <section id="screen-reveal" class="screen">
-        <div class="look-wrap">
-          <div class="reveal-title">photographer&apos;s pick</div>
-          <div id="reveal-row" class="tile-row"></div>
+      <section id="screen-reveal" class="screen reveal-scene">
+        <div id="reveal-title" class="reveal-hero-title">photographer&apos;s pick</div>
+        <img id="reveal-photo" class="reveal-photo" src="" alt="" />
+        <img id="reveal-finale-photo" class="reveal-finale-photo" src="" alt="" />
+        <div id="reveal-final" class="reveal-final">
+          <div class="reveal-final-title">photographer&apos;s pick</div>
+          <div id="reveal-row" class="reveal-row"></div>
         </div>
       </section>
 
