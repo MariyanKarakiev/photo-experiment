@@ -1,0 +1,55 @@
+---
+export const prerender = false;
+
+import "../../styles/global.css";
+import { isAuthenticated } from "../../lib/auth.js";
+
+if (isAuthenticated(Astro.cookies)) return Astro.redirect("/admin");
+const url = new URL(Astro.request.url);
+const errored = url.searchParams.has("e");
+const passwordSet = Boolean(
+  (typeof process !== "undefined" && process.env?.ADMIN_PASSWORD) || import.meta.env.ADMIN_PASSWORD
+);
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>admin · photo experiment</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="stage">
+      <section class="screen on">
+        <form class="name-wrap" method="post" action="/api/admin-login">
+          <div class="lbl">admin</div>
+          <input
+            type="password"
+            name="password"
+            placeholder="—"
+            autocomplete="current-password"
+            autofocus
+            required
+          />
+          <div>
+            <button class="confirm" type="submit">enter</button>
+          </div>
+          {errored && (
+            <div class="status" style="margin-top: 1.5rem; text-align: center; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-soft);">wrong password</div>
+          )}
+          {!passwordSet && (
+            <div class="status" style="margin-top: 1.5rem; text-align: center; font-size: 10px; letter-spacing: 0.16em; color: var(--ink-soft);">
+              set the ADMIN_PASSWORD env var to enable this page
+            </div>
+          )}
+        </form>
+      </section>
+    </div>
+  </body>
+</html>

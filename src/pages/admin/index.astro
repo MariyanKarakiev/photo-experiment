@@ -1,0 +1,713 @@
+---
+export const prerender = false;
+
+import "../../styles/global.css";
+import { isAuthenticated } from "../../lib/auth.js";
+import { listSubmissions } from "../../lib/storage.js";
+import { PHOTOS } from "../../config/photos.js";
+import { PICK_ACTIONS, DEVICE_TYPES } from "../../lib/constants.js";
+
+if (!isAuthenticated(Astro.cookies)) return Astro.redirect("/admin/login");
+
+const submissions = await listSubmissions();
+const total = submissions.length;
+
+/* ---------- aggregate helpers ---------- */
+const num = (n) => (typeof n === "number" && isFinite(n) ? n : 0);
+const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0);
+const dur = (secs) => {
+  const n = Math.round(secs || 0);
+  if (n < 60) return n + "s";
+  const m = Math.floor(n / 60);
+  return m + "m " + (n - m * 60) + "s";
+};
+
+const firstSelectTimes = submissions.map((s) => s.secondsUntilFirstSelection).filter((n) => typeof n === "number" && n >= 0);
+const totalTimes = submissions.map((s) => num(s.secondsPerScreen?.totalFromStartToSubmit)).filter((n) => n > 0);
+const whyTimes = submissions.map((s) => num(s.secondsPerScreen?.writeExplanationScreen)).filter((n) => n > 0);
+const avgFirstSelect = avg(firstSelectTimes);
+const avgTotalTime = avg(totalTimes);
+const avgWhyTime = avg(whyTimes);
+
+const sessionsWithUndo = submissions.filter((s) => (s.selectionEvents || []).some((e) => e.action === PICK_ACTIONS.UNPICK)).length;
+const undoRatePct = total ? Math.round((sessionsWithUndo / total) * 100) : 0;
+
+const deviceCounts = {
+  [DEVICE_TYPES.DESKTOP]: 0,
+  [DEVICE_TYPES.MOBILE]:  0,
+  [DEVICE_TYPES.TABLET]:  0,
+  [DEVICE_TYPES.UNKNOWN]: 0,
+};
+for (const s of submissions) {
+  const t = s.device?.type;
+  if (t && deviceCounts[t] != null) deviceCounts[t]++;
+  else deviceCounts[DEVICE_TYPES.UNKNOWN]++;
+}
+const deviceMax = Math.max(1, ...Object.values(deviceCounts));
+
+const pickCounts    = Object.fromEntries(PHOTOS.map((p) => [p.id, 0]));
+const openerCounts  = Object.fromEntries(PHOTOS.map((p) => [p.id, 0]));
+const attentionSecs = Object.fromEntries(PHOTOS.map((p) => [p.id, 0]));
+const attentionSess = Object.fromEntries(PHOTOS.map((p) => [p.id, 0]));
+
+for (const s of submissions) {
+  for (const id of s.finalPicksInOrder || []) if (pickCounts[id] != null) pickCounts[id]++;
+  if (s.openerPhoto && openerCounts[s.openerPhoto] != null) openerCounts[s.openerPhoto]++;
+  const dw = s.secondsPerPhoto?.duringFreeBrowse || {};
+  for (const id of Object.keys(dw)) {
+    if (attentionSecs[id] != null) {
+      attentionSecs[id] += num(dw[id]);
+      if (num(dw[id]) > 0) attentionSess[id]++;
+    }
+  }
+}
+const avgAttention = Object.fromEntries(
+  PHOTOS.map((p) => [p.id, attentionSess[p.id] ? Math.round(attentionSecs[p.id] / attentionSess[p.id]) : 0])
+);
+
+const maxPick      = Math.max(1, ...Object.values(pickCounts));
+const maxOpener    = Math.max(1, ...Object.values(openerCounts));
+const maxAttention = Math.max(1, ...Object.values(avgAttention));
+
+const idToSrc = Object.fromEntries(PHOTOS.map((p) => [p.id, p.src]));
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>admin · photo experiment</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500&display=swap" rel="stylesheet" />
+    <style is:global>
+      html, body { overflow: auto; }
+      body { min-height: 100%; padding: 3rem 5vw 6rem 5vw; background: var(--bg); color: var(--ink); }
+      .admin-wrap { max-width: 1240px; margin: 0 auto; }
+
+      .admin-header {
+        display: flex; justify-content: space-between; align-items: baseline;
+        border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2rem;
+      }
+      .admin-header h1 { font-size: 22px; font-weight: 300; letter-spacing: -0.01em; }
+      .admin-header .lbl { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-soft); }
+      .admin-header a {
+        font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+        color: var(--ink); text-decoration: none;
+        border-bottom: 1px solid var(--ink); padding-bottom: 2px;
+      }
+
+      /* Stat cards */
+      .stats {
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+      .stat { border-top: 1px solid var(--ink); padding-top: 0.85rem; }
+      .stat .lbl { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 0.3rem; }
+      .stat .val { font-size: 34px; font-weight: 300; letter-spacing: -0.01em; line-height: 1; }
+      .stat .sub { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-soft); margin-top: 0.3rem; text-transform: uppercase; }
+
+      /* Device breakdown row */
+      .devices {
+        display: grid; grid-template-columns: 100px 1fr; gap: 0.35rem 12px; align-items: center;
+        margin-bottom: 2.75rem;
+      }
+      .devices .row-lbl { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-soft); }
+      .devices .row-bar-wrap { display: grid; grid-template-columns: 1fr 26px; gap: 12px; align-items: center; }
+      .devices .row-bar { height: 8px; background: var(--ink); min-width: 1px; }
+      .devices .row-bar.zero { background: var(--rule); height: 1px; }
+      .devices .row-count { font-size: 11px; text-align: right; }
+
+      /* Chart grid */
+      .charts {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem;
+        margin-bottom: 2.5rem;
+      }
+      .chart .head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        border-bottom: 1px solid var(--rule); padding-bottom: 0.5rem; margin-bottom: 0.75rem;
+      }
+      .chart .head .t { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; }
+      .chart .head .u { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-soft); text-transform: uppercase; }
+      .chart-rows { display: grid; grid-template-columns: 20px 1fr 34px; gap: 6px 12px; align-items: center; }
+      .chart-rows .id { font-size: 11px; color: var(--ink-soft); }
+      .chart-rows .bar { height: 8px; background: var(--ink); min-width: 1px; }
+      .chart-rows .bar.zero { background: var(--rule); height: 1px; }
+      .chart-rows .count { font-size: 11px; text-align: right; }
+
+      /* Table */
+      table.subs { width: 100%; border-collapse: collapse; }
+      table.subs th, table.subs td {
+        padding: 0.85rem 0.5rem; text-align: left;
+        border-bottom: 1px solid var(--rule);
+        font-size: 13px; font-weight: 300;
+      }
+      table.subs th {
+        font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+        color: var(--ink-soft); font-weight: 500;
+      }
+      table.subs td.name { font-weight: 400; }
+      table.subs tbody tr { cursor: pointer; transition: background 100ms ease; }
+      table.subs tbody tr:hover td { background: var(--bg-soft); }
+      table.subs td .thumbs { display: inline-flex; gap: 4px; align-items: center; }
+      table.subs td .thumbs img { width: 22px; height: 33px; object-fit: cover; display: block; user-select: none; }
+
+      .empty { text-align: center; color: var(--ink-soft); padding: 4rem 0; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; }
+
+      /* Detail overlay + panel */
+      .overlay {
+        position: fixed; inset: 0;
+        background: rgba(20,20,15,0.45);
+        opacity: 0; pointer-events: none;
+        transition: opacity 250ms ease;
+        z-index: 40;
+      }
+      .overlay.open { opacity: 1; pointer-events: auto; }
+
+      .panel {
+        position: fixed;
+        top: 0; right: 0; bottom: 0;
+        width: min(640px, 100vw);
+        background: var(--bg);
+        border-left: 1px solid var(--rule);
+        overflow-y: auto;
+        transform: translateX(100%);
+        transition: transform 300ms ease;
+        z-index: 50;
+      }
+      .panel.open { transform: translateX(0); }
+      .panel-body { padding: 2.5rem 2.25rem 5rem 2.25rem; }
+      .panel-close {
+        position: fixed;
+        top: 1rem; right: 1.25rem;
+        background: transparent; border: none;
+        color: var(--ink);
+        padding: 4px 6px;
+        font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase;
+        cursor: pointer; z-index: 60;
+        display: none;
+      }
+      .panel-close.open { display: inline-block; }
+
+      .panel h2 {
+        font-size: 26px; font-weight: 300; letter-spacing: -0.01em;
+        margin-bottom: 0.3rem;
+      }
+      .panel .meta {
+        font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-soft);
+        margin-bottom: 2.5rem;
+      }
+      .panel h3 {
+        font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+        color: var(--ink-soft); font-weight: 500;
+        margin: 2rem 0 0.9rem 0;
+      }
+
+      /* Hero: picks */
+      .hero-picks {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+      .hero-picks .cell { position: relative; line-height: 0; }
+      .hero-picks .cell img {
+        display: block; width: 100%; height: auto; user-select: none;
+      }
+      .hero-picks .rank {
+        position: absolute; top: 6px; left: 8px;
+        background: var(--bg); color: var(--ink);
+        font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+        padding: 2px 6px;
+      }
+      .hero-picks .cell .caption {
+        margin-top: 0.5rem;
+        font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--ink-soft); line-height: 1.4;
+      }
+
+      /* Why — hero quote */
+      .why-hero {
+        font-size: 18px; font-weight: 300;
+        line-height: 1.55;
+        border-left: 2px solid var(--ink);
+        padding: 0.5rem 0 0.5rem 1.15rem;
+        margin-top: 0.5rem;
+        white-space: pre-wrap;
+      }
+
+      /* Attention grid — 3x3 mini tiles with bars */
+      .attention-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px 12px;
+      }
+      .attention-grid .cell { line-height: 0; }
+      .attention-grid .cell.picked { outline: 1px solid var(--ink); outline-offset: 2px; }
+      .attention-grid .cell img {
+        display: block; width: 100%; height: auto; user-select: none;
+      }
+      .attention-grid .cell .track {
+        margin-top: 6px;
+        height: 4px; background: var(--rule); position: relative;
+      }
+      .attention-grid .cell .track .fill {
+        position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink);
+      }
+      .attention-grid .cell .n {
+        margin-top: 4px;
+        font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-soft); line-height: 1;
+      }
+
+      /* Session summary strip */
+      .session-summary {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr) auto;
+        gap: 1.25rem;
+        align-items: flex-start;
+        padding: 0.9rem 0;
+        border-top: 1px solid var(--rule);
+        border-bottom: 1px solid var(--rule);
+      }
+      .session-summary .cell .k {
+        font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+        color: var(--ink-soft); margin-bottom: 0.3rem;
+      }
+      .session-summary .cell .v {
+        font-size: 18px; font-weight: 300; letter-spacing: -0.01em;
+        font-variant-numeric: tabular-nums; line-height: 1;
+      }
+      .session-summary .opener { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+      .session-summary .opener .k {
+        font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-soft);
+      }
+      .session-summary .opener img {
+        width: 44px; height: auto; display: block; user-select: none;
+      }
+
+      /* Time-by-screen — stacked bar + legend */
+      .screen-time-bar {
+        display: flex;
+        width: 100%;
+        height: 22px;
+        margin-bottom: 0.85rem;
+        border: 1px solid var(--ink);
+      }
+      .screen-time-bar .seg {
+        display: block;
+        min-width: 1px;
+        border-right: 1px solid var(--bg);
+      }
+      .screen-time-bar .seg:last-child { border-right: none; }
+      .screen-time-bar .seg.s1 { background: #14140F; }
+      .screen-time-bar .seg.s2 { background: #3a382f; }
+      .screen-time-bar .seg.s3 { background: #6a675a; }
+      .screen-time-bar .seg.s4 { background: #a09b8a; }
+      .screen-time-bar .seg.s5 { background: #c9c4b3; }
+
+      .screen-time-legend {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.5rem 1rem;
+        font-size: 12px;
+      }
+      .screen-time-legend .item {
+        display: grid;
+        grid-template-columns: 12px 1fr 60px;
+        align-items: center;
+        gap: 10px;
+      }
+      .screen-time-legend .swatch {
+        width: 10px; height: 10px; flex: 0 0 auto;
+      }
+      .screen-time-legend .v { text-align: right; }
+      .screen-time-legend .swatch.s1 { background: #14140F; }
+      .screen-time-legend .swatch.s2 { background: #3a382f; }
+      .screen-time-legend .swatch.s3 { background: #6a675a; }
+      .screen-time-legend .swatch.s4 { background: #a09b8a; }
+      .screen-time-legend .swatch.s5 { background: #c9c4b3; }
+      .screen-time-legend .k { color: var(--ink-soft); }
+      .screen-time-legend .v { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+      /* Journey — inline pick/unpick chips */
+      .journey {
+        display: flex; flex-wrap: wrap; gap: 6px 8px;
+      }
+      .journey .step {
+        display: inline-flex; align-items: baseline; gap: 6px;
+        font-size: 11px;
+        padding: 4px 8px;
+        border: 1px solid var(--rule);
+      }
+      .journey .step.pick   { border-color: var(--ink); }
+      .journey .step.unpick { border-color: var(--rule); color: var(--ink-soft); }
+      .journey .step .t {
+        font-size: 10px; letter-spacing: 0.12em; color: var(--ink-soft);
+        font-variant-numeric: tabular-nums;
+      }
+      .journey .step .a { font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; }
+      .journey .step .p { font-weight: 500; }
+      .empty-line { color: var(--ink-soft); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; }
+
+      details { margin-top: 2rem; }
+      details summary {
+        cursor: pointer;
+        font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+      details pre {
+        margin-top: 0.75rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px; line-height: 1.55; color: var(--ink-soft);
+        white-space: pre-wrap; word-break: break-word;
+        background: var(--bg-soft); padding: 0.75rem 1rem; border: 1px solid var(--rule);
+      }
+
+      @media (max-width: 900px) {
+        .stats { grid-template-columns: repeat(2, 1fr); }
+        .charts { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 720px) {
+        .devices { grid-template-columns: 90px 1fr; }
+        .panel { width: 100vw; border-left: none; }
+        .panel-body { padding: 2.5rem 1.15rem 3rem 1.15rem; }
+        table.subs td .thumbs img { width: 18px; height: 27px; }
+        .session-summary { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+        .session-summary .opener { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 10px; }
+        .session-summary .opener .k { margin-bottom: 0; }
+        .why-hero { font-size: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-wrap">
+      <header class="admin-header">
+        <div>
+          <h1>photo experiment · admin</h1>
+          <div class="lbl">{total} submission{total === 1 ? "" : "s"}</div>
+        </div>
+        <a href="/api/admin-login">log out</a>
+      </header>
+
+      <!-- Top stat cards -->
+      <section class="stats">
+        <div class="stat">
+          <div class="lbl">submissions</div>
+          <div class="val">{total}</div>
+        </div>
+        <div class="stat">
+          <div class="lbl">avg. time to first pick</div>
+          <div class="val">{avgFirstSelect}<span style="font-size: 18px;">s</span></div>
+        </div>
+        <div class="stat">
+          <div class="lbl">avg. total session</div>
+          <div class="val">{dur(avgTotalTime)}</div>
+          <div class="sub">avg. write time: {avgWhyTime}s</div>
+        </div>
+        <div class="stat">
+          <div class="lbl">undo rate</div>
+          <div class="val">{undoRatePct}<span style="font-size: 18px;">%</span></div>
+          <div class="sub">{sessionsWithUndo} of {total} sessions had ≥1 unpick</div>
+        </div>
+      </section>
+
+      <!-- Device breakdown -->
+      <section class="devices">
+        <div class="row-lbl">desktop</div>
+        <div class="row-bar-wrap">
+          <div class={"row-bar" + (deviceCounts[DEVICE_TYPES.DESKTOP] === 0 ? " zero" : "")} style={`width: ${(deviceCounts[DEVICE_TYPES.DESKTOP] / deviceMax) * 100}%`}></div>
+          <div class="row-count">{deviceCounts[DEVICE_TYPES.DESKTOP]}</div>
+        </div>
+        <div class="row-lbl">mobile</div>
+        <div class="row-bar-wrap">
+          <div class={"row-bar" + (deviceCounts[DEVICE_TYPES.MOBILE] === 0 ? " zero" : "")} style={`width: ${(deviceCounts[DEVICE_TYPES.MOBILE] / deviceMax) * 100}%`}></div>
+          <div class="row-count">{deviceCounts[DEVICE_TYPES.MOBILE]}</div>
+        </div>
+        <div class="row-lbl">tablet</div>
+        <div class="row-bar-wrap">
+          <div class={"row-bar" + (deviceCounts[DEVICE_TYPES.TABLET] === 0 ? " zero" : "")} style={`width: ${(deviceCounts[DEVICE_TYPES.TABLET] / deviceMax) * 100}%`}></div>
+          <div class="row-count">{deviceCounts[DEVICE_TYPES.TABLET]}</div>
+        </div>
+        {deviceCounts[DEVICE_TYPES.UNKNOWN] > 0 && (
+          <>
+            <div class="row-lbl">unknown</div>
+            <div class="row-bar-wrap">
+              <div class="row-bar" style={`width: ${(deviceCounts[DEVICE_TYPES.UNKNOWN] / deviceMax) * 100}%`}></div>
+              <div class="row-count">{deviceCounts[DEVICE_TYPES.UNKNOWN]}</div>
+            </div>
+          </>
+        )}
+      </section>
+
+      <!-- Three side-by-side charts -->
+      <section class="charts">
+        <div class="chart">
+          <div class="head"><span class="t">picks per photo</span><span class="u">count</span></div>
+          <div class="chart-rows">
+            {PHOTOS.map((p) => (
+              <>
+                <div class="id">{p.id}</div>
+                <div class={"bar" + (pickCounts[p.id] === 0 ? " zero" : "")} style={`width: ${(pickCounts[p.id] / maxPick) * 100}%`}></div>
+                <div class="count">{pickCounts[p.id]}</div>
+              </>
+            ))}
+          </div>
+        </div>
+        <div class="chart">
+          <div class="head"><span class="t">first-clicked photo</span><span class="u">count</span></div>
+          <div class="chart-rows">
+            {PHOTOS.map((p) => (
+              <>
+                <div class="id">{p.id}</div>
+                <div class={"bar" + (openerCounts[p.id] === 0 ? " zero" : "")} style={`width: ${(openerCounts[p.id] / maxOpener) * 100}%`}></div>
+                <div class="count">{openerCounts[p.id]}</div>
+              </>
+            ))}
+          </div>
+        </div>
+        <div class="chart">
+          <div class="head"><span class="t">avg. attention (free browse)</span><span class="u">seconds</span></div>
+          <div class="chart-rows">
+            {PHOTOS.map((p) => (
+              <>
+                <div class="id">{p.id}</div>
+                <div class={"bar" + (avgAttention[p.id] === 0 ? " zero" : "")} style={`width: ${(avgAttention[p.id] / maxAttention) * 100}%`}></div>
+                <div class="count">{avgAttention[p.id]}s</div>
+              </>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {total === 0 ? (
+        <div class="empty">no submissions yet</div>
+      ) : (
+        <table class="subs">
+          <thead>
+            <tr>
+              <th style="width: 160px;">submitted</th>
+              <th style="width: 140px;">name</th>
+              <th style="width: 90px;">device</th>
+              <th style="width: 60px;">opener</th>
+              <th>picks</th>
+              <th style="width: 90px;">total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {submissions.map((s, i) => (
+              <tr data-idx={i}>
+                <td>{(s.submittedAt || "").replace("T", " ").slice(0, 16)}</td>
+                <td class="name">{s.name}</td>
+                <td>{s.device?.type || "?"}</td>
+                <td>{s.openerPhoto || "—"}</td>
+                <td>
+                  <span class="thumbs">
+                    {(s.finalPicksInOrder || []).map((id) => (
+                      <img src={idToSrc[id]} alt="" />
+                    ))}
+                  </span>
+                </td>
+                <td>{dur(s.secondsPerScreen?.totalFromStartToSubmit)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+
+    <div id="overlay" class="overlay"></div>
+    <aside id="panel" class="panel" aria-hidden="true">
+      <div id="panel-body" class="panel-body"></div>
+    </aside>
+    <button id="panel-close" class="panel-close" type="button">close</button>
+
+    <script id="submissions-data" type="application/json" set:html={JSON.stringify(submissions)}></script>
+    <script id="idmap-data" type="application/json" set:html={JSON.stringify(idToSrc)}></script>
+    <script id="photo-order-data" type="application/json" set:html={JSON.stringify(PHOTOS.map((p) => p.id))}></script>
+    <script id="pick-actions-data" type="application/json" set:html={JSON.stringify(PICK_ACTIONS)}></script>
+
+    <script>
+      const submissions = JSON.parse(document.getElementById("submissions-data").textContent || "[]");
+      const idMap = JSON.parse(document.getElementById("idmap-data").textContent || "{}");
+      const PHOTO_ORDER = JSON.parse(document.getElementById("photo-order-data").textContent || "[]");
+      const PICK_ACTIONS = JSON.parse(document.getElementById("pick-actions-data").textContent || "{}");
+      const overlay = document.getElementById("overlay");
+      const panel = document.getElementById("panel");
+      const panelBody = document.getElementById("panel-body");
+      const panelClose = document.getElementById("panel-close");
+
+      function dur(secs) {
+        const n = Math.round(secs || 0);
+        if (n < 60) return n + "s";
+        const m = Math.floor(n / 60);
+        return m + "m " + (n - m * 60) + "s";
+      }
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      function pill(text) { return `<span class="rank">${esc(text)}</span>`; }
+
+      function renderDetail(s) {
+        const picks  = s.finalPicksInOrder || [];
+        const spp    = s.secondsPerScreen  || {};
+        const events = s.selectionEvents   || [];
+        const clicks = s.tileClickEvents   || [];
+        const dwellFree = s.secondsPerPhoto?.duringFreeBrowse || {};
+        const dwellSel  = s.secondsPerPhoto?.duringSelection  || {};
+        const undo   = events.filter((e) => e.action === PICK_ACTIONS.UNPICK).length;
+
+        // HERO: picks
+        const picksHtml = picks.length
+          ? `<div class="hero-picks">${picks.map((id, i) => {
+              const secondsSeenInSelection = dwellSel[id] || 0;
+              return `
+                <div class="cell">
+                  <span class="rank">${i + 1}</span>
+                  <img src="${esc(idMap[id] || "")}" alt="">
+                  <div class="caption">${esc(id)} · seen ${secondsSeenInSelection}s while choosing</div>
+                </div>
+              `;
+            }).join("")}</div>`
+          : `<div class="empty-line">no picks</div>`;
+
+        // HERO: why
+        const whyText = (s.whyExplanation || "").trim();
+        const whyHtml = whyText
+          ? `<div class="why-hero">${esc(whyText)}</div>`
+          : `<div class="empty-line">(no explanation given)</div>`;
+
+        // Attention grid — all 9 photos, tiny tiles, bar for free-browse dwell
+        const dwellValues = PHOTO_ORDER.map((id) => dwellFree[id] || 0);
+        const maxDwell = Math.max(1, ...dwellValues);
+        const pickedSet = new Set(picks);
+        const attentionHtml = `<div class="attention-grid">${PHOTO_ORDER.map((id) => {
+          const secs = dwellFree[id] || 0;
+          const pct = Math.max(0, Math.min(100, (secs / maxDwell) * 100));
+          const isPicked = pickedSet.has(id);
+          return `
+            <div class="cell${isPicked ? " picked" : ""}">
+              <img src="${esc(idMap[id] || "")}" alt="">
+              <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+              <div class="n">${esc(id)} · ${secs}s</div>
+            </div>
+          `;
+        }).join("")}</div>`;
+
+        // Compact session summary
+        const openerImg = s.openerPhoto
+          ? `<img src="${esc(idMap[s.openerPhoto] || "")}" alt="">`
+          : `<span class="empty-line">none</span>`;
+        const summaryHtml = `
+          <div class="session-summary">
+            <div class="cell">
+              <div class="k">total time</div>
+              <div class="v">${esc(dur(spp.totalFromStartToSubmit))}</div>
+            </div>
+            <div class="cell">
+              <div class="k">first pick at</div>
+              <div class="v">${s.secondsUntilFirstSelection != null ? esc(s.secondsUntilFirstSelection + "s") : "—"}</div>
+            </div>
+            <div class="cell">
+              <div class="k">tile taps</div>
+              <div class="v">${clicks.length}</div>
+            </div>
+            <div class="cell">
+              <div class="k">undos</div>
+              <div class="v">${undo}</div>
+            </div>
+            <div class="opener">
+              <div class="k">first tapped</div>
+              ${openerImg}
+            </div>
+          </div>
+        `;
+
+        // Time by screen — proportional stacked bar + legend
+        const stages = [
+          { cls: "s1", label: "looking at the grid of nine photos", v: spp.browseAllPhotosGrid },
+          { cls: "s2", label: "browsing photos one by one",         v: spp.browseAllPhotosSwipe },
+          { cls: "s3", label: "reading the selection instructions", v: spp.readInstructionsScreen },
+          { cls: "s4", label: "picking their three favourites",     v: spp.pickPhotosSwipe },
+          { cls: "s5", label: "writing the explanation",            v: spp.writeExplanationScreen },
+        ].map((x) => ({ ...x, v: Math.max(0, Math.round(x.v || 0)) }));
+        const stageSum = stages.reduce((a, b) => a + b.v, 0) || 1;
+        const barHtml = `<div class="screen-time-bar">${stages
+          .filter((x) => x.v > 0)
+          .map((x) => `<div class="seg ${x.cls}" style="width: ${(x.v / stageSum) * 100}%" title="${esc(x.label)} · ${x.v}s"></div>`)
+          .join("")}</div>`;
+        const legendHtml = `<div class="screen-time-legend">${stages
+          .map((x) => `<div class="item"><span class="swatch ${x.cls}"></span><span class="k">${esc(x.label)}</span><span class="v">${x.v}s</span></div>`)
+          .join("")}</div>`;
+        const timeByScreenHtml = barHtml + legendHtml;
+
+        // Selection journey — inline chips
+        const journeyHtml = events.length
+          ? `<div class="journey">${events.map((e) => `
+              <span class="step ${esc(e.action)}">
+                <span class="t">${e.atSecond}s</span>
+                <span class="a">${esc(e.action)}</span>
+                <span class="p">${esc(e.photo)}</span>
+              </span>
+            `).join("")}</div>`
+          : `<div class="empty-line">no selection events</div>`;
+
+        return `
+          <h2>${esc(s.name || "anonymous")}</h2>
+          <div class="meta">${esc((s.submittedAt || "").replace("T", " ").slice(0, 19))} · ${esc(s.device?.type || "?")} · ${esc(s.device?.viewport || "")}</div>
+
+          <h3>picks (${picks.length} of 3)</h3>
+          ${picksHtml}
+
+          <h3>why</h3>
+          ${whyHtml}
+
+          <h3>attention across all photos · free browse</h3>
+          ${attentionHtml}
+
+          <h3>session</h3>
+          ${summaryHtml}
+
+          <h3>time by screen</h3>
+          ${timeByScreenHtml}
+
+          <h3>selection journey</h3>
+          ${journeyHtml}
+
+          <details>
+            <summary>raw json</summary>
+            <pre>${esc(JSON.stringify(s, null, 2))}</pre>
+          </details>
+        `;
+      }
+
+      function openPanel(i) {
+        const s = submissions[i];
+        if (!s) return;
+        panelBody.innerHTML = renderDetail(s);
+        panelBody.scrollTop = 0;
+        overlay.classList.add("open");
+        panel.classList.add("open");
+        panelClose.classList.add("open");
+        panel.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+      }
+      function closePanel() {
+        overlay.classList.remove("open");
+        panel.classList.remove("open");
+        panelClose.classList.remove("open");
+        panel.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+      }
+
+      document.querySelectorAll("table.subs tbody tr").forEach((row) => {
+        row.addEventListener("click", () => openPanel(Number(row.dataset.idx)));
+      });
+      overlay.addEventListener("click", closePanel);
+      panelClose.addEventListener("click", closePanel);
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && panel.classList.contains("open")) closePanel();
+      });
+    </script>
+  </body>
+</html>

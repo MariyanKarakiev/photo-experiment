@@ -1,0 +1,128 @@
+---
+import "../styles/global.css";
+import { PHOTOS, TITLE_LINES, TITLE_SUB, BRIEF_LINES, BRIEF_SUB } from "../config/photos.js";
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>a small experiment</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="stage">
+
+      <!-- 01 · title -->
+      <section id="screen-title" class="screen">
+        <div class="title-copy">
+          {TITLE_LINES.map((line) => <span>{line}<br /></span>)}
+          <span class="sub">{TITLE_SUB}</span>
+        </div>
+      </section>
+
+      <!-- 02 · name -->
+      <section id="screen-name" class="screen">
+        <div class="name-wrap">
+          <div class="lbl">your name</div>
+          <input id="name-input" type="text" placeholder="—" autocomplete="off" spellcheck="false" />
+          <div>
+            <button id="name-confirm" class="confirm" type="button">continue</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 03 · look -->
+      <section id="screen-look" class="screen">
+        <div class="look-wrap">
+          <div id="tile-row" class="tile-row">
+            {PHOTOS.map((p) => (
+              <div class="tile" tabindex="0">
+                <img src={p.src} alt="" draggable="false" />
+              </div>
+            ))}
+          </div>
+          <div id="look-caption" class="look-caption">tap any to begin</div>
+          <button id="look-ready" class="look-ready" type="button">i&apos;m ready</button>
+        </div>
+      </section>
+
+      <!-- 04 · swipe (stage 1) -->
+      <section id="screen-swipe" class="screen">
+        <div id="swipe-frame" class="frame">
+          <div class="controls-top">
+            <button id="close-btn" class="link" type="button">close</button>
+            <button id="ready-btn" class="link" type="button">i&apos;m ready</button>
+          </div>
+          <div class="image-wrap">
+            <img id="swipe-img" src={PHOTOS[0].src} alt="" draggable="false" />
+            <button id="swipe-prev" class="nav-zone prev" type="button" aria-label="previous"></button>
+            <button id="swipe-next" class="nav-zone next" type="button" aria-label="next"></button>
+          </div>
+          <div class="controls-bottom">
+            <span id="swipe-idx" class="idx">01 / 09</span>
+            <span class="hint">← swipe →</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 05 · brief -->
+      <section id="screen-brief" class="screen">
+        <div class="title-copy">
+          {BRIEF_LINES.map((line) => <span>{line}<br /></span>)}
+          <span class="sub">{BRIEF_SUB}</span>
+        </div>
+      </section>
+
+      <!-- 06 · choose (stage 2) -->
+      <section id="screen-choose" class="screen">
+        <div id="choose-frame" class="frame">
+          <div class="controls-top">
+            <span id="choose-idx" class="idx">01 / 09</span>
+            <button id="pick-word" class="pick-word" type="button">select</button>
+          </div>
+          <div class="image-wrap">
+            <img id="choose-img" src={PHOTOS[0].src} alt="" draggable="false" />
+            <button id="choose-prev" class="nav-zone prev" type="button" aria-label="previous"></button>
+            <button id="choose-next" class="nav-zone next" type="button" aria-label="next"></button>
+          </div>
+          <div class="controls-bottom">
+            <span id="choose-counter">0 / 3 chosen</span>
+            <button id="done-btn" class="link" type="button" disabled>done</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 06 · why -->
+      <section id="screen-why" class="screen">
+        <div class="why-wrap">
+          <div class="lbl">say why</div>
+          <textarea id="why-input" placeholder="—"></textarea>
+          <button id="submit-btn" class="submit" type="button" disabled>submit</button>
+          <div id="submit-status" class="status"></div>
+        </div>
+      </section>
+
+      <!-- 07 · reveal -->
+      <section id="screen-reveal" class="screen">
+        <div class="look-wrap">
+          <div class="reveal-title">photographer&apos;s pick</div>
+          <div id="reveal-row" class="tile-row"></div>
+        </div>
+      </section>
+
+    </div>
+
+    <button id="restart" class="restart" type="button">start over</button>
+
+    <script>
+      import "../scripts/app.js";
+    </script>
+  </body>
+</html>

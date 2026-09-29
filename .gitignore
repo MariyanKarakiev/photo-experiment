@@ -1,0 +1,10 @@
+node_modules
+dist
+.astro
+.env
+.env.local
+.env.production
+.superpowers
+.vercel
+.local-data
+.DS_Store
